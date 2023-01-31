@@ -1,0 +1,1 @@
+export const DRIVE_ICON_URL = 'https://imgs.search.brave.com/Ag7fXBLnY7FpZznBJ78SDwCoPDgbJBm2R0Y1WcFnVP4/rs:fit:1200:1200:1/g:ce/aHR0cHM6Ly9waXhs/b2suY29tL3dwLWNv/bnRlbnQvdXBsb2Fk/cy8yMDIxLzA0L0dv/b2dsZV9Ecml2ZV9p/Y29uLmpwZw';

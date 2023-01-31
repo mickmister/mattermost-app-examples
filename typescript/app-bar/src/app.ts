@@ -6,11 +6,13 @@ import express from 'express';
 // Shim for mattermost-redux global fetch access
 global.fetch = require('node-fetch');
 
-import {AppBinding, AppCallRequest, AppCallResponse, AppForm, AppManifest} from '@mattermost/types/lib/apps';
+import {AppBinding, AppCallRequest, AppCallResponse, AppForm, AppManifest, Locations, Permission} from './types';
 import {Post} from '@mattermost/types/lib/posts';
 import {Channel} from '@mattermost/types/lib/channels';
 
 import {Client4} from '@mattermost/client';
+import rhsViewsRouter from './rhs_views/home/document_list_view';
+import {DRIVE_ICON_URL} from './constants';
 
 const host = process.env.APP_HOST || 'localhost';
 const port = process.env.APP_PORT || 4000;
@@ -19,8 +21,9 @@ const app = express();
 app.use(express.json());
 
 // Uncomment these lines to enable verbose debugging of requests and responses
-// import logger from './middleware/logger';
-// app.use(logger);
+import logger from './middleware/logger';
+import actionsRouter from './actions';
+app.use(logger);
 
 app.use((req, res, next) => {
     const call: AppCallRequest = req.body;
@@ -34,22 +37,23 @@ app.use((req, res, next) => {
     next();
 });
 
-const manifest = {
-    app_id: 'node-example',
+const manifest: AppManifest = {
+    app_id: 'hello-world-app-bar',
     display_name: "Hello World",
     description: "Example TypeScript app for Mattermost",
     homepage_url: 'https://github.com/mattermost/mattermost-app-examples/typescript/hello-world',
-    app_type: 'http',
     icon: 'icon.png',
-    root_url: `http://${host}:${port}`,
     requested_permissions: [
-        'act_as_bot',
+        Permission.ActAsBot,
     ],
     requested_locations: [
-        '/channel_header',
-        '/command',
+        Locations.ChannelHeader,
+        Locations.Command,
     ],
-} as AppManifest;
+    http: {
+        root_url: `http://${host}:${port}`,
+    },
+};
 
 const form: AppForm = {
     title: "I'm a form!",
@@ -64,27 +68,33 @@ const form: AppForm = {
     ],
     submit: {
         path: '/submit',
+        expand: {
+            acting_user: 'summary',
+        },
     },
 };
 
-const channelHeaderBindings = {
+const channelHeaderBindings: AppBinding = {
     location: '/channel_header',
     bindings: [
         {
             location: 'send-button',
-            icon: 'icon.png',
+            icon: DRIVE_ICON_URL,
             label: 'send hello message',
-            form,
+            // form,
+            submit: {
+                path: '/views/home',
+            },
         },
     ],
-} as AppBinding;
+};
 
-const commandBindings = {
+const commandBindings: AppBinding = {
     location: '/command',
     bindings: [
         {
             icon: 'icon.png',
-            label: 'node-example',
+            label: 'hello-world-app-bar',
             description: manifest.description,
             hint: '[send]',
             bindings: [
@@ -96,21 +106,21 @@ const commandBindings = {
             ],
         },
     ],
-} as AppBinding;
+};
 
 // Serve resources from the static folder
 app.use('/static', express.static('./static'));
 
-app.get('/manifest.json', (req, res) => {
+app.get<undefined, AppManifest>('/manifest.json', (req, res) => {
     res.json(manifest);
 });
 
-app.post('/bindings', (req, res) => {
+app.post<undefined, AppCallResponse<AppBinding[]>, AppCallRequest>('/bindings', (req, res) => {
     const callResponse: AppCallResponse<AppBinding[]> = {
         type: 'ok',
         data: [
             channelHeaderBindings,
-            commandBindings,
+            // commandBindings,
         ],
     };
 
@@ -121,8 +131,14 @@ type FormValues = {
     message: string;
 }
 
-app.post('/submit', async (req, res) => {
-    const call = req.body as AppCallRequest;
+app.post<undefined, AppCallResponse, AppCallRequest>('/submit', async (req, res) => {
+    const call = req.body;
+
+    const actingUser = call.context.acting_user;
+    if (!actingUser) {
+        res.json({type: 'error', text: 'acting_user not provided'});
+        return;
+    }
 
     const botClient = new Client4();
     botClient.setUrl(call.context.mattermost_site_url);
@@ -138,7 +154,7 @@ app.post('/submit', async (req, res) => {
 
     const users = [
         call.context.bot_user_id,
-        call.context.acting_user.id,
+        actingUser.id,
     ] as string[];
 
     let channel: Channel;
@@ -147,7 +163,7 @@ app.post('/submit', async (req, res) => {
     } catch (e: any) {
         res.json({
             type: 'error',
-            error: 'Failed to create/fetch DM channel: ' + e.message,
+            text: 'Failed to create/fetch DM channel: ' + e.message,
         });
         return;
     }
@@ -162,7 +178,7 @@ app.post('/submit', async (req, res) => {
     } catch (e: any) {
         res.json({
             type: 'error',
-            error: 'Failed to create post in DM channel: ' + e.message,
+            text: 'Failed to create post in DM channel: ' + e.message,
         });
         return;
     }
@@ -174,6 +190,9 @@ app.post('/submit', async (req, res) => {
 
     res.json(callResponse);
 });
+
+app.use(rhsViewsRouter);
+app.use('/actions', actionsRouter);
 
 app.listen(port, () => {
     console.log(`app listening on port ${port}`);
